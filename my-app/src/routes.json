@@ -1,0 +1,9 @@
+{
+  "routes": [
+    { "method": "GET", "path": "/", "handler": "home" },
+    { "method": "GET", "path": "/api/health", "handler": "health" },
+    { "method": "GET", "path": "/api/users", "handler": "getUsers" },
+    { "method": "POST", "path": "/api/users", "handler": "createUser" },
+    { "method": "GET", "path": "/api/users/:id", "handler": "getUserById" }
+  ]
+}

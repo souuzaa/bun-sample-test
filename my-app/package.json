@@ -1,0 +1,42 @@
+{
+  "name": "my-app",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun run build.ts",
+    "serve": "bun run dist/index.js",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:logs:app": "docker compose logs -f app",
+    "docker:restart": "docker compose restart app",
+    "docker:stats": "docker stats my-app my-app-prometheus my-app-grafana --no-stream",
+    "k6:quick": "k6 run k6/quick-test.js",
+    "k6:stress": "k6 run k6/stress-test.js",
+    "k6:spike": "k6 run k6/spike-test.js",
+    "k6:soak": "k6 run k6/soak-test.js",
+    "k6:full": "k6 run k6/load-test.js",
+    "k6:docker:quick": "docker run --rm -i --add-host=host.docker.internal:host-gateway -e BASE_URL=http://host.docker.internal:3000 -v ./k6:/scripts grafana/k6 run /scripts/quick-test.js",
+    "k6:docker:stress": "docker run --rm -i --add-host=host.docker.internal:host-gateway -e BASE_URL=http://host.docker.internal:3000 -v ./k6:/scripts grafana/k6 run /scripts/stress-test.js",
+    "k6:docker:spike": "docker run --rm -i --add-host=host.docker.internal:host-gateway -e BASE_URL=http://host.docker.internal:3000 -v ./k6:/scripts grafana/k6 run /scripts/spike-test.js",
+    "k6:docker:soak": "docker run --rm -i --add-host=host.docker.internal:host-gateway -e BASE_URL=http://host.docker.internal:3000 -v ./k6:/scripts grafana/k6 run /scripts/soak-test.js",
+    "k6:docker:full": "docker run --rm -i --add-host=host.docker.internal:host-gateway -e BASE_URL=http://host.docker.internal:3000 -v ./k6:/scripts grafana/k6 run /scripts/load-test.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/sdk-metrics": "^1.19.0",
+    "@opentelemetry/exporter-prometheus": "^0.46.0",
+    "@opentelemetry/semantic-conventions": "^1.19.0",
+    "prom-client": "^15.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-02-01T15:45:19.434Z",
+  "scenarios": {},
+  "overall": {
+      "totalRequests": 2577,
+      "failedRequests": 2577,
+      "avgDuration": "0.00",
+      "p50Duration": 0,
+      "p95Duration": "0.00",
+      "p99Duration": 0,
+      "maxDuration": "0.00",
+      "errorRate": "100.00%"
+    }
+}
