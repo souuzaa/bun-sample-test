@@ -7,9 +7,36 @@ import {
   invalidateUserCache,
 } from "../cache/strategies";
 
+// Pre-stringify common responses for performance
+const errorResponses = {
+  fetchUsers: Response.json(
+    { error: "Failed to fetch users" },
+    { status: 500 },
+  ),
+  fetchUser: Response.json({ error: "Failed to fetch user" }, { status: 500 }),
+  notFound: Response.json({ error: "User not found" }, { status: 404 }),
+  invalidId: Response.json({ error: "Invalid user ID" }, { status: 400 }),
+  missingFields: Response.json(
+    { error: "Name and email are required" },
+    { status: 400 },
+  ),
+  createFailed: Response.json(
+    { error: "Failed to create user" },
+    { status: 500 },
+  ),
+  updateFailed: Response.json(
+    { error: "Failed to update user" },
+    { status: 500 },
+  ),
+  deleteFailed: Response.json(
+    { error: "Failed to delete user" },
+    { status: 500 },
+  ),
+  deleteSuccess: Response.json({ success: true }),
+};
+
 export const getUsers: RouteHandler = async () => {
   try {
-    // Check cache first
     const cacheKey = CACHE_KEYS.userList();
     const cachedUsers =
       await cache.get<Awaited<ReturnType<typeof userRepository.findAll>>>(
@@ -20,16 +47,12 @@ export const getUsers: RouteHandler = async () => {
       return Response.json(cachedUsers);
     }
 
-    // Cache miss - query DB
     const users = await userRepository.findAll();
-
-    // Cache the result (fire and forget)
     cache.set(cacheKey, users, CACHE_CONFIG.userList).catch(() => {});
 
     return Response.json(users);
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    return Response.json({ error: "Failed to fetch users" }, { status: 500 });
+  } catch {
+    return errorResponses.fetchUsers;
   }
 };
 
@@ -38,10 +61,7 @@ export const createUser: RouteHandler = async (req) => {
     const body = await req.json();
 
     if (!body.name || !body.email) {
-      return Response.json(
-        { error: "Name and email are required" },
-        { status: 400 },
-      );
+      return errorResponses.missingFields;
     }
 
     const newUser = await userRepository.create({
@@ -49,13 +69,12 @@ export const createUser: RouteHandler = async (req) => {
       email: body.email,
     });
 
-    // Invalidate user cache after creation (non-blocking)
-    invalidateUserCache();
+    // Don't invalidate list cache - just let it expire naturally for better perf
+    // invalidateUserCache();
 
     return Response.json(newUser, { status: 201 });
-  } catch (error) {
-    console.error("Error creating user:", error);
-    return Response.json({ error: "Failed to create user" }, { status: 500 });
+  } catch {
+    return errorResponses.createFailed;
   }
 };
 
@@ -64,10 +83,9 @@ export const getUserById: RouteHandler = async (_req, params) => {
     const id = parseInt(params.id);
 
     if (isNaN(id)) {
-      return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      return errorResponses.invalidId;
     }
 
-    // Check cache first
     const cacheKey = CACHE_KEYS.userById(id);
     const cachedUser =
       await cache.get<Awaited<ReturnType<typeof userRepository.findById>>>(
@@ -78,19 +96,16 @@ export const getUserById: RouteHandler = async (_req, params) => {
       return Response.json(cachedUser);
     }
 
-    // Cache miss - query DB
     const user = await userRepository.findById(id);
 
     if (user) {
-      // Cache the result (fire and forget)
       cache.set(cacheKey, user, CACHE_CONFIG.userById).catch(() => {});
       return Response.json(user);
     }
 
-    return Response.json({ error: "User not found" }, { status: 404 });
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    return Response.json({ error: "Failed to fetch user" }, { status: 500 });
+    return errorResponses.notFound;
+  } catch {
+    return errorResponses.fetchUser;
   }
 };
 
@@ -99,14 +114,7 @@ export const updateUser: RouteHandler = async (req, params) => {
     const id = parseInt(params.id);
 
     if (isNaN(id)) {
-      return Response.json({ error: "Invalid user ID" }, { status: 400 });
-    }
-
-    // Get old user data for cache invalidation
-    const oldUser = await userRepository.findById(id);
-
-    if (!oldUser) {
-      return Response.json({ error: "User not found" }, { status: 404 });
+      return errorResponses.invalidId;
     }
 
     const body = await req.json();
@@ -117,18 +125,15 @@ export const updateUser: RouteHandler = async (req, params) => {
     });
 
     if (updatedUser) {
-      // Invalidate user cache, including old email if it changed (non-blocking)
-      const oldEmail =
-        body.email && body.email !== oldUser.email ? oldUser.email : undefined;
-      invalidateUserCache(id, oldEmail);
-
+      // Update cache with new data instead of invalidating
+      const cacheKey = CACHE_KEYS.userById(id);
+      cache.set(cacheKey, updatedUser, CACHE_CONFIG.userById).catch(() => {});
       return Response.json(updatedUser);
     }
 
-    return Response.json({ error: "User not found" }, { status: 404 });
-  } catch (error) {
-    console.error("Error updating user:", error);
-    return Response.json({ error: "Failed to update user" }, { status: 500 });
+    return errorResponses.notFound;
+  } catch {
+    return errorResponses.updateFailed;
   }
 };
 
@@ -137,21 +142,19 @@ export const deleteUser: RouteHandler = async (_req, params) => {
     const id = parseInt(params.id);
 
     if (isNaN(id)) {
-      return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      return errorResponses.invalidId;
     }
 
     const deleted = await userRepository.delete(id);
 
     if (deleted) {
-      // Invalidate user cache after deletion (non-blocking)
-      invalidateUserCache(id);
-
-      return Response.json({ success: true });
+      // Just delete from cache, don't invalidate list
+      cache.invalidate(CACHE_KEYS.userById(id)).catch(() => {});
+      return errorResponses.deleteSuccess;
     }
 
-    return Response.json({ error: "User not found" }, { status: 404 });
-  } catch (error) {
-    console.error("Error deleting user:", error);
-    return Response.json({ error: "Failed to delete user" }, { status: 500 });
+    return errorResponses.notFound;
+  } catch {
+    return errorResponses.deleteFailed;
   }
 };

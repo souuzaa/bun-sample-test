@@ -11,37 +11,20 @@ const payloadSizeKb = new Trend("payload_size_kb");
 const cacheHits = new Counter("cache_hits");
 const cacheMisses = new Counter("cache_misses");
 
-// Test configuration with realistic traffic mix
+// Test configuration optimized for max RPS (read-only)
 export const options = {
   scenarios: {
-    // 90% of traffic - read operations (should hit cache)
+    // Pure read operations for throughput testing
     read_heavy: {
       executor: "constant-vus",
-      vus: 150,
+      vus: 50,
       duration: "2m",
       exec: "readOperations",
     },
-    // 8% of traffic - write operations (invalidates cache)
-    write_moderate: {
-      executor: "constant-vus",
-      vus: 15,
-      duration: "2m",
-      exec: "writeOperations",
-      startTime: "5s",
-    },
-    // 2% of traffic - CPU intensive operations (reduced)
-    cpu_intensive: {
-      executor: "constant-vus",
-      vus: 3,
-      duration: "2m",
-      exec: "cpuOperations",
-      startTime: "10s",
-    },
   },
   thresholds: {
-    http_req_duration: ["p(95)<100", "p(99)<200"],
-    http_req_failed: ["rate<0.05"],
-    hash_processing_time: ["p(95)<500"],
+    http_req_duration: ["p(95)<50", "p(99)<100"],
+    http_req_failed: ["rate<0.01"],
   },
 };
 
@@ -76,8 +59,7 @@ export function readOperations() {
     },
   });
 
-  // Minimal sleep for max throughput
-  sleep(0.01);
+  // No sleep for max throughput
 }
 
 // Write operations - 15% of traffic

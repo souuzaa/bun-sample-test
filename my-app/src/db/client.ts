@@ -9,10 +9,9 @@ const sql = postgres({
   password: process.env.DB_PASSWORD || "myapp_secret",
 
   // Connection pool settings (application-level)
-  // Keep reasonable since PgBouncer does the heavy lifting
-  max: 20,
-  idle_timeout: 20,
-  connect_timeout: 5,
+  max: 50,
+  idle_timeout: 30,
+  connect_timeout: 10,
 
   // CRITICAL for PgBouncer transaction mode
   prepare: false, // Disable prepared statements
