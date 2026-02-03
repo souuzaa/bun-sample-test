@@ -1,4 +1,4 @@
-import { LRUCache } from 'lru-cache';
+import { LRUCache } from "lru-cache";
 
 export interface CacheOptions {
   max?: number;
@@ -7,10 +7,10 @@ export interface CacheOptions {
 
 // L1 cache - in-process, nanosecond access
 const l1Cache = new LRUCache<string, unknown>({
-  max: 1000,              // Max 1000 items
-  ttl: 1000 * 30,         // 30 second TTL (short for consistency)
-  updateAgeOnGet: true,   // Reset TTL on access
-  allowStale: false,      // Don't return stale data
+  max: 10000, // Max 10000 items
+  ttl: 1000 * 30, // 30 second TTL (short for consistency)
+  updateAgeOnGet: true, // Reset TTL on access
+  allowStale: true, // Return stale while revalidating
 });
 
 export const l1 = {
@@ -28,7 +28,7 @@ export const l1 = {
 
   // Invalidate all keys matching a pattern
   invalidatePattern(pattern: string): void {
-    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+    const regex = new RegExp(pattern.replace(/\*/g, ".*"));
     for (const key of l1Cache.keys()) {
       if (regex.test(key)) {
         l1Cache.delete(key);

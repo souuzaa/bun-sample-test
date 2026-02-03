@@ -21,13 +21,6 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email) INCLUDE (name);
 
 -- ============================================================
--- Seed data
--- ============================================================
-INSERT INTO users (name, email) VALUES
-  ('Alice', 'alice@example.com'),
-  ('Bob', 'bob@example.com');
-
--- ============================================================
 -- Workload simulation tables
 -- ============================================================
 
@@ -71,3 +64,33 @@ CREATE TRIGGER users_updated_at
   BEFORE UPDATE ON users
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- Seed data
+-- ============================================================
+
+-- Generate 1000 users
+INSERT INTO users (name, email, created_at)
+SELECT
+  'User ' || i,
+  'user' || i || '@example.com',
+  NOW() - (random() * interval '365 days')
+FROM generate_series(1, 1000) AS i;
+
+-- Generate 5000 hash jobs with realistic data
+INSERT INTO hash_jobs (input_data, hash_result, iterations, processing_time_ms, created_at)
+SELECT
+  'benchmark-data-' || i || '-' || md5(random()::text),
+  md5(random()::text) || md5(random()::text),
+  (random() * 50000 + 10000)::integer,
+  random() * 100 + 5,
+  NOW() - (random() * interval '30 days')
+FROM generate_series(1, 5000) AS i;
+
+-- Generate 2000 payload records
+INSERT INTO payloads (size_kb, data, created_at)
+SELECT
+  (random() * 490 + 10)::integer,
+  decode(repeat(md5(random()::text), 10), 'hex'),
+  NOW() - (random() * interval '30 days')
+FROM generate_series(1, 2000) AS i;

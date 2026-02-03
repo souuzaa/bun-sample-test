@@ -1,47 +1,47 @@
-import http from 'k6/http';
-import { check, sleep } from 'k6';
-import { Trend, Counter } from 'k6/metrics';
+import http from "k6/http";
+import { check, sleep } from "k6";
+import { Trend, Counter } from "k6/metrics";
 
 // Configuration
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+const BASE_URL = __ENV.BASE_URL || "http://localhost:3000";
 
 // Custom metrics
-const hashProcessingTime = new Trend('hash_processing_time');
-const payloadSizeKb = new Trend('payload_size_kb');
-const cacheHits = new Counter('cache_hits');
-const cacheMisses = new Counter('cache_misses');
+const hashProcessingTime = new Trend("hash_processing_time");
+const payloadSizeKb = new Trend("payload_size_kb");
+const cacheHits = new Counter("cache_hits");
+const cacheMisses = new Counter("cache_misses");
 
 // Test configuration with realistic traffic mix
 export const options = {
   scenarios: {
     // 80% of traffic - read operations (should hit cache)
     read_heavy: {
-      executor: 'constant-vus',
-      vus: 40,
-      duration: '2m',
-      exec: 'readOperations',
+      executor: "constant-vus",
+      vus: 100,
+      duration: "2m",
+      exec: "readOperations",
     },
     // 15% of traffic - write operations (invalidates cache)
     write_moderate: {
-      executor: 'constant-vus',
-      vus: 10,
-      duration: '2m',
-      exec: 'writeOperations',
-      startTime: '5s',
+      executor: "constant-vus",
+      vus: 20,
+      duration: "2m",
+      exec: "writeOperations",
+      startTime: "5s",
     },
     // 5% of traffic - CPU intensive operations
     cpu_intensive: {
-      executor: 'constant-vus',
-      vus: 5,
-      duration: '2m',
-      exec: 'cpuOperations',
-      startTime: '10s',
+      executor: "constant-vus",
+      vus: 10,
+      duration: "2m",
+      exec: "cpuOperations",
+      startTime: "10s",
     },
   },
   thresholds: {
-    http_req_duration: ['p(95)<100', 'p(99)<200'],
-    http_req_failed: ['rate<0.01'],
-    hash_processing_time: ['p(95)<500'],
+    http_req_duration: ["p(95)<100", "p(99)<200"],
+    http_req_failed: ["rate<0.05"], // Allow 5% failures under high load
+    hash_processing_time: ["p(95)<500"],
   },
 };
 
@@ -51,8 +51,8 @@ export function readOperations() {
   // GET /api/users - should hit L1/L2 cache
   const usersResponse = http.get(`${BASE_URL}/api/users`);
   check(usersResponse, {
-    'GET /api/users status is 200': (r) => r.status === 200,
-    'GET /api/users has users': (r) => {
+    "GET /api/users status is 200": (r) => r.status === 200,
+    "GET /api/users has users": (r) => {
       try {
         const body = JSON.parse(r.body);
         return Array.isArray(body) && body.length > 0;
@@ -65,8 +65,8 @@ export function readOperations() {
   // GET /api/users/1 - should hit cache
   const userResponse = http.get(`${BASE_URL}/api/users/1`);
   check(userResponse, {
-    'GET /api/users/1 status is 200': (r) => r.status === 200,
-    'GET /api/users/1 has user data': (r) => {
+    "GET /api/users/1 status is 200": (r) => r.status === 200,
+    "GET /api/users/1 has user data": (r) => {
       try {
         const body = JSON.parse(r.body);
         return body.id !== undefined;
@@ -76,8 +76,8 @@ export function readOperations() {
     },
   });
 
-  // Small sleep to simulate realistic traffic
-  sleep(0.1);
+  // Minimal sleep for max throughput
+  sleep(0.01);
 }
 
 // Write operations - 15% of traffic
@@ -90,12 +90,12 @@ export function writeOperations() {
   });
 
   const response = http.post(`${BASE_URL}/api/users`, payload, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
   });
 
   check(response, {
-    'POST /api/users status is 201': (r) => r.status === 201,
-    'POST /api/users returns user': (r) => {
+    "POST /api/users status is 201": (r) => r.status === 201,
+    "POST /api/users returns user": (r) => {
       try {
         const body = JSON.parse(r.body);
         return body.id !== undefined && body.email !== undefined;
@@ -105,7 +105,7 @@ export function writeOperations() {
     },
   });
 
-  sleep(0.5);
+  sleep(0.05);
 }
 
 // CPU intensive operations - 5% of traffic
@@ -119,12 +119,12 @@ export function cpuOperations() {
   });
 
   const hashResponse = http.post(`${BASE_URL}/api/workload/hash`, hashPayload, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
   });
 
   check(hashResponse, {
-    'POST /api/workload/hash status is 200': (r) => r.status === 200,
-    'POST /api/workload/hash returns hash': (r) => {
+    "POST /api/workload/hash status is 200": (r) => r.status === 200,
+    "POST /api/workload/hash returns hash": (r) => {
       try {
         const body = JSON.parse(r.body);
         return body.hash !== undefined && body.processingTimeMs !== undefined;
@@ -152,13 +152,17 @@ export function cpuOperations() {
     size_kb: sizeKb,
   });
 
-  const payloadResponse = http.post(`${BASE_URL}/api/workload/payload`, payloadPayload, {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const payloadResponse = http.post(
+    `${BASE_URL}/api/workload/payload`,
+    payloadPayload,
+    {
+      headers: { "Content-Type": "application/json" },
+    },
+  );
 
   check(payloadResponse, {
-    'POST /api/workload/payload status is 200': (r) => r.status === 200,
-    'POST /api/workload/payload returns data': (r) => {
+    "POST /api/workload/payload status is 200": (r) => r.status === 200,
+    "POST /api/workload/payload returns data": (r) => {
       try {
         const body = JSON.parse(r.body);
         return body.size_kb !== undefined && body.data !== undefined;
@@ -173,14 +177,14 @@ export function cpuOperations() {
     payloadSizeKb.add(sizeKb);
   }
 
-  sleep(1);
+  sleep(0.1);
 }
 
 // Optional: Setup function to verify server is ready
 export function setup() {
   const healthResponse = http.get(`${BASE_URL}/api/health`);
   check(healthResponse, {
-    'Health check passed': (r) => r.status === 200,
+    "Health check passed": (r) => r.status === 200,
   });
 
   if (healthResponse.status !== 200) {

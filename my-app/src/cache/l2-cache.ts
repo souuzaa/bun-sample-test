@@ -1,32 +1,36 @@
-import Redis from 'ioredis';
+import Redis from "ioredis";
 
-// Connection pool via ioredis
+const redisHost = process.env.REDIS_HOST || "redis";
+const redisPort = parseInt(process.env.REDIS_PORT || "6379");
+
+// Connection pool via ioredis Cluster-like setup for single node
 const redis = new Redis({
-  host: process.env.REDIS_HOST || 'redis',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
+  host: redisHost,
+  port: redisPort,
 
-  // Connection pool settings
+  // Connection settings
   maxRetriesPerRequest: 3,
   retryDelayOnFailover: 100,
 
   // Performance settings
-  enableReadyCheck: true,
+  enableReadyCheck: false, // Skip ready check for faster startup
   enableOfflineQueue: true,
-  connectTimeout: 10000,
+  connectTimeout: 5000,
 
   // Keep-alive
-  keepAlive: 30000,
-  lazyConnect: true,
+  keepAlive: 10000,
+  lazyConnect: false, // Connect immediately
 });
 
 // Pub/Sub client for cache invalidation
 const subscriber = new Redis({
-  host: process.env.REDIS_HOST || 'redis',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  lazyConnect: true,
+  host: redisHost,
+  port: redisPort,
+  enableReadyCheck: false,
+  lazyConnect: false,
 });
 
-const CACHE_CHANNEL = 'cache:invalidate';
+const CACHE_CHANNEL = "cache:invalidate";
 
 export const l2 = {
   async get<T>(key: string): Promise<T | null> {
@@ -47,15 +51,19 @@ export const l2 = {
     if (keys.length === 0) return [];
 
     const pipeline = redis.pipeline();
-    keys.forEach(key => pipeline.get(key));
+    keys.forEach((key) => pipeline.get(key));
     const results = await pipeline.exec();
 
-    return results?.map(([err, data]) =>
-      err ? null : (data ? JSON.parse(data as string) : null)
-    ) || [];
+    return (
+      results?.map(([err, data]) =>
+        err ? null : data ? JSON.parse(data as string) : null,
+      ) || []
+    );
   },
 
-  async mset<T>(entries: Array<{ key: string; value: T; ttl?: number }>): Promise<void> {
+  async mset<T>(
+    entries: Array<{ key: string; value: T; ttl?: number }>,
+  ): Promise<void> {
     if (entries.length === 0) return;
 
     const pipeline = redis.pipeline();
@@ -73,7 +81,7 @@ export const l2 = {
   // Subscribe to invalidation messages
   onInvalidation(callback: (pattern: string) => void): void {
     subscriber.subscribe(CACHE_CHANNEL);
-    subscriber.on('message', (channel, message) => {
+    subscriber.on("message", (channel, message) => {
       if (channel === CACHE_CHANNEL) {
         callback(message);
       }
