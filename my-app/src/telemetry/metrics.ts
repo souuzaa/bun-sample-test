@@ -74,7 +74,63 @@ export const httpResponseSize: Histogram = meter.createHistogram(
   },
 );
 
+// ============================================================
+// Extreme Performance Architecture Metrics
+// ============================================================
+
+// Request queue time - THE key saturation metric
+export const requestQueueTime: Histogram = meter.createHistogram(
+  "http_request_queue_time_ms",
+  {
+    description: "Time between request arrival and handler execution start",
+    unit: "ms",
+    advice: {
+      explicitBucketBoundaries: [0.1, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500],
+    },
+  },
+);
+
+// Cache metrics
+export const cacheHitCounter: Counter = meter.createCounter(
+  "cache_hits_total",
+  {
+    description: "Total cache hits",
+  },
+);
+
+export const cacheMissCounter: Counter = meter.createCounter(
+  "cache_misses_total",
+  {
+    description: "Total cache misses",
+  },
+);
+
+export const cacheLatency: Histogram = meter.createHistogram(
+  "cache_latency_ms",
+  {
+    description: "Cache operation latency",
+    unit: "ms",
+    advice: {
+      explicitBucketBoundaries: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    },
+  },
+);
+
+// Database metrics
+export const dbQueryDuration: Histogram = meter.createHistogram(
+  "pg_query_duration_ms",
+  {
+    description: "PostgreSQL query duration",
+    unit: "ms",
+    advice: {
+      explicitBucketBoundaries: [0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500],
+    },
+  },
+);
+
+// ============================================================
 // Error metrics
+// ============================================================
 export const httpErrorsTotal: Counter = meter.createCounter(
   "http_errors_total",
   {
@@ -385,7 +441,7 @@ cpuUsageLimitPercentGauge.addCallback((result) => {
 });
 
 // Export the meter provider for shutdown
-export { meterProvider, prometheusExporter };
+export { meterProvider, prometheusExporter, meter };
 
 console.log(
   "Prometheus metrics server running at http://localhost:9464/metrics",

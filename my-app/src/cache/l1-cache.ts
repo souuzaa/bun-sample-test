@@ -1,0 +1,49 @@
+import { LRUCache } from 'lru-cache';
+
+export interface CacheOptions {
+  max?: number;
+  ttl?: number;
+}
+
+// L1 cache - in-process, nanosecond access
+const l1Cache = new LRUCache<string, unknown>({
+  max: 1000,              // Max 1000 items
+  ttl: 1000 * 30,         // 30 second TTL (short for consistency)
+  updateAgeOnGet: true,   // Reset TTL on access
+  allowStale: false,      // Don't return stale data
+});
+
+export const l1 = {
+  get<T>(key: string): T | undefined {
+    return l1Cache.get(key) as T | undefined;
+  },
+
+  set<T>(key: string, value: T, ttlMs?: number): void {
+    l1Cache.set(key, value, { ttl: ttlMs });
+  },
+
+  delete(key: string): void {
+    l1Cache.delete(key);
+  },
+
+  // Invalidate all keys matching a pattern
+  invalidatePattern(pattern: string): void {
+    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+    for (const key of l1Cache.keys()) {
+      if (regex.test(key)) {
+        l1Cache.delete(key);
+      }
+    }
+  },
+
+  clear(): void {
+    l1Cache.clear();
+  },
+
+  stats() {
+    return {
+      size: l1Cache.size,
+      max: l1Cache.max,
+    };
+  },
+};

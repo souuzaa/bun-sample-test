@@ -11,6 +11,13 @@ services:
     environment:
       - NODE_ENV=production
       - BUN_ENV=production
+      - DB_HOST=pgbouncer
+      - DB_PORT=5432
+      - DB_NAME=myapp
+      - DB_USER=myapp
+      - DB_PASSWORD=myapp_secret
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     deploy:
       resources:
         limits:
@@ -33,9 +40,138 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    sysctls:
+      - net.core.somaxconn=65535
+      - net.ipv4.tcp_max_syn_backlog=65535
+      - net.ipv4.tcp_tw_reuse=1
+      - net.ipv4.tcp_fastopen=3
+      - net.ipv4.ip_local_port_range=1024 65535
+      - net.ipv4.tcp_keepalive_time=60
+      - net.ipv4.tcp_keepalive_intvl=10
+      - net.ipv4.tcp_keepalive_probes=6
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1000000
+      nproc:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - /proc/net:/host/proc/net:ro
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - monitoring
+
+  # PostgreSQL - Primary Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: my-app-postgres
+    environment:
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: myapp_secret
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=512MB"
+      - "-c"
+      - "max_connections=50"
+      - "-c"
+      - "work_mem=16MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+    restart: unless-stopped
+
+  # PgBouncer - Connection Pooling
+  pgbouncer:
+    image: pgbouncer/pgbouncer:latest
+    container_name: my-app-pgbouncer
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_USER: myapp
+      DATABASES_PASSWORD: myapp_secret
+      DATABASES_DBNAME: myapp
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: 10
+      PGBOUNCER_MIN_POOL_SIZE: 5
+      PGBOUNCER_RESERVE_POOL_SIZE: 5
+      PGBOUNCER_MAX_CLIENT_CONN: 10000
+      PGBOUNCER_MAX_DB_CONNECTIONS: 20
+      PGBOUNCER_LISTEN_PORT: 5432
+      PGBOUNCER_AUTH_TYPE: plain
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: extra_float_digits
+    ports:
+      - "5432:5432"
+    networks:
+      - monitoring
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 5432 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    restart: unless-stopped
+
+  # Redis - L2 Cache
+  redis:
+    image: redis:7-alpine
+    container_name: my-app-redis
+    command: >
+      redis-server
+      --appendonly no
+      --save ""
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --tcp-backlog 511
+      --timeout 0
+      --activedefrag yes
+    ports:
+      - "6379:6379"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    sysctls:
+      - net.core.somaxconn=511
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    restart: unless-stopped
 
   # Prometheus - Metrics Collection
   prometheus:
@@ -104,3 +240,4 @@ networks:
 volumes:
   prometheus-data:
   grafana-data:
+  postgres-data:
