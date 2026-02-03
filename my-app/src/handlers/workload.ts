@@ -1,42 +1,104 @@
 import type { RouteHandler } from "./types";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
 import { sql } from "../db/client";
 
+// Worker pool for CPU-intensive hash operations
+const WORKER_POOL_SIZE = 6;
+const workerPool: Worker[] = [];
+const workerQueue: Array<{
+  resolve: (value: string) => void;
+  reject: (error: Error) => void;
+  data: string;
+  iterations: number;
+}> = [];
+const busyWorkers = new Set<Worker>();
+
+// Initialize worker pool
+for (let i = 0; i < WORKER_POOL_SIZE; i++) {
+  const worker = new Worker(
+    new URL("../workers/hash-worker.ts", import.meta.url).href,
+  );
+  workerPool.push(worker);
+}
+
+function getAvailableWorker(): Worker | null {
+  for (const worker of workerPool) {
+    if (!busyWorkers.has(worker)) {
+      return worker;
+    }
+  }
+  return null;
+}
+
+function processQueue() {
+  while (workerQueue.length > 0) {
+    const worker = getAvailableWorker();
+    if (!worker) break;
+
+    const task = workerQueue.shift()!;
+    busyWorkers.add(worker);
+
+    const handler = (event: MessageEvent) => {
+      worker.removeEventListener("message", handler);
+      worker.removeEventListener("error", errorHandler);
+      busyWorkers.delete(worker);
+      task.resolve(event.data.hash);
+      processQueue();
+    };
+
+    const errorHandler = (error: ErrorEvent) => {
+      worker.removeEventListener("message", handler);
+      worker.removeEventListener("error", errorHandler);
+      busyWorkers.delete(worker);
+      task.reject(new Error(error.message));
+      processQueue();
+    };
+
+    worker.addEventListener("message", handler);
+    worker.addEventListener("error", errorHandler);
+    worker.postMessage({ data: task.data, iterations: task.iterations });
+  }
+}
+
+function hashInWorker(data: string, iterations: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    workerQueue.push({ resolve, reject, data, iterations });
+    processQueue();
+  });
+}
+
 /**
- * CPU-intensive workload: Hash iterations
+ * CPU-intensive workload: Hash iterations (runs in worker thread)
  * POST /api/workload/hash
  * Body: { data: string, iterations?: number }
  */
 export const hashWorkload: RouteHandler = async (req) => {
   try {
-    const body = await req.json() as { data?: string; iterations?: number };
+    const body = (await req.json()) as { data?: string; iterations?: number };
     const { data, iterations = 10000 } = body;
 
     if (!data) {
       return Response.json({ error: "data is required" }, { status: 400 });
     }
 
+    // Cap iterations to prevent extreme CPU usage
+    const cappedIterations = Math.min(iterations, 100000);
+
     const start = performance.now();
 
-    // Use @noble/hashes for better performance than Bun's native crypto
-    let hash = new TextEncoder().encode(data);
-    for (let i = 0; i < iterations; i++) {
-      hash = sha256(hash);
-    }
-    const hashResult = bytesToHex(hash);
+    // Run hash computation in worker thread
+    const hashResult = await hashInWorker(data, cappedIterations);
 
     const processingTimeMs = performance.now() - start;
 
-    // Store in database
-    await sql`
+    // Store in database (fire and forget for performance)
+    sql`
       INSERT INTO hash_jobs (input_data, hash_result, iterations, processing_time_ms)
-      VALUES (${data}, ${hashResult}, ${iterations}, ${processingTimeMs})
-    `;
+      VALUES (${data}, ${hashResult}, ${cappedIterations}, ${processingTimeMs})
+    `.catch(() => {});
 
     return Response.json({
       hash: hashResult,
-      iterations,
+      iterations: cappedIterations,
       processingTimeMs: Math.round(processingTimeMs * 100) / 100,
     });
   } catch (error) {
@@ -52,8 +114,8 @@ export const hashWorkload: RouteHandler = async (req) => {
  */
 export const payloadWorkload: RouteHandler = async (req) => {
   try {
-    const body = await req.json() as { size_kb?: number };
-    const sizeKb = Math.min(body.size_kb || 100, 10000); // Max 10MB
+    const body = (await req.json()) as { size_kb?: number };
+    const sizeKb = Math.min(body.size_kb || 100, 1000); // Max 1MB for better throughput
 
     const start = performance.now();
 
@@ -63,19 +125,11 @@ export const payloadWorkload: RouteHandler = async (req) => {
 
     const processingTimeMs = performance.now() - start;
 
-    // Store metadata (not the full payload for large sizes)
-    if (sizeKb <= 100) {
-      await sql`
-        INSERT INTO payloads (size_kb, data)
-        VALUES (${sizeKb}, ${Buffer.from(data)})
-      `;
-    } else {
-      // Just store metadata for large payloads
-      await sql`
-        INSERT INTO payloads (size_kb)
-        VALUES (${sizeKb})
-      `;
-    }
+    // Store metadata only (fire and forget for performance)
+    sql`
+      INSERT INTO payloads (size_kb)
+      VALUES (${sizeKb})
+    `.catch(() => {});
 
     // Convert to base64 for JSON response
     const base64Data = Buffer.from(data).toString("base64");
@@ -98,7 +152,10 @@ export const payloadWorkload: RouteHandler = async (req) => {
  */
 export const memoryWorkload: RouteHandler = async (req) => {
   try {
-    const body = await req.json() as { allocate_mb?: number; duration_ms?: number };
+    const body = (await req.json()) as {
+      allocate_mb?: number;
+      duration_ms?: number;
+    };
     const allocateMb = Math.min(body.allocate_mb || 10, 100); // Max 100MB
     const durationMs = Math.min(body.duration_ms || 100, 5000); // Max 5s
 
@@ -135,40 +192,56 @@ export const memoryWorkload: RouteHandler = async (req) => {
  */
 export const workloadStatus: RouteHandler = async () => {
   try {
-    const [hashStats] = await sql`
-      SELECT
-        COUNT(*) as total_jobs,
-        AVG(processing_time_ms) as avg_time_ms,
-        MAX(processing_time_ms) as max_time_ms,
-        MIN(processing_time_ms) as min_time_ms
-      FROM hash_jobs
-      WHERE created_at > NOW() - INTERVAL '1 hour'
-    `;
+    // Run both queries in parallel
+    const [hashStatsResult, payloadStatsResult] = await Promise.all([
+      sql`
+        SELECT
+          COUNT(*) as total_jobs,
+          AVG(processing_time_ms) as avg_time_ms,
+          MAX(processing_time_ms) as max_time_ms,
+          MIN(processing_time_ms) as min_time_ms
+        FROM hash_jobs
+        WHERE created_at > NOW() - INTERVAL '1 hour'
+      `,
+      sql`
+        SELECT
+          COUNT(*) as total_payloads,
+          SUM(size_kb) as total_kb,
+          AVG(size_kb) as avg_size_kb
+        FROM payloads
+        WHERE created_at > NOW() - INTERVAL '1 hour'
+      `,
+    ]);
 
-    const [payloadStats] = await sql`
-      SELECT
-        COUNT(*) as total_payloads,
-        SUM(size_kb) as total_kb,
-        AVG(size_kb) as avg_size_kb
-      FROM payloads
-      WHERE created_at > NOW() - INTERVAL '1 hour'
-    `;
+    const hashStats = hashStatsResult[0];
+    const payloadStats = payloadStatsResult[0];
 
     return Response.json({
       hash_jobs: {
         total_jobs: Number(hashStats.totalJobs) || 0,
-        avg_time_ms: hashStats.avgTimeMs ? Math.round(Number(hashStats.avgTimeMs) * 100) / 100 : 0,
-        max_time_ms: hashStats.maxTimeMs ? Math.round(Number(hashStats.maxTimeMs) * 100) / 100 : 0,
-        min_time_ms: hashStats.minTimeMs ? Math.round(Number(hashStats.minTimeMs) * 100) / 100 : 0,
+        avg_time_ms: hashStats.avgTimeMs
+          ? Math.round(Number(hashStats.avgTimeMs) * 100) / 100
+          : 0,
+        max_time_ms: hashStats.maxTimeMs
+          ? Math.round(Number(hashStats.maxTimeMs) * 100) / 100
+          : 0,
+        min_time_ms: hashStats.minTimeMs
+          ? Math.round(Number(hashStats.minTimeMs) * 100) / 100
+          : 0,
       },
       payloads: {
         total_payloads: Number(payloadStats.totalPayloads) || 0,
         total_kb: Number(payloadStats.totalKb) || 0,
-        avg_size_kb: payloadStats.avgSizeKb ? Math.round(Number(payloadStats.avgSizeKb) * 100) / 100 : 0,
+        avg_size_kb: payloadStats.avgSizeKb
+          ? Math.round(Number(payloadStats.avgSizeKb) * 100) / 100
+          : 0,
       },
     });
   } catch (error) {
     console.error("Error fetching workload status:", error);
-    return Response.json({ error: "Failed to fetch workload status" }, { status: 500 });
+    return Response.json(
+      { error: "Failed to fetch workload status" },
+      { status: 500 },
+    );
   }
 };

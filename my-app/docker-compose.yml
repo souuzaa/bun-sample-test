@@ -21,11 +21,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 1024M
+          cpus: "6.0"
+          memory: 2048M
         reservations:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "2.0"
+          memory: 512M
     healthcheck:
       test:
         [
@@ -46,9 +46,10 @@ services:
       - net.ipv4.tcp_tw_reuse=1
       - net.ipv4.tcp_fastopen=3
       - net.ipv4.ip_local_port_range=1024 65535
-      - net.ipv4.tcp_keepalive_time=60
-      - net.ipv4.tcp_keepalive_intvl=10
-      - net.ipv4.tcp_keepalive_probes=6
+      - net.ipv4.tcp_keepalive_time=30
+      - net.ipv4.tcp_keepalive_intvl=5
+      - net.ipv4.tcp_keepalive_probes=3
+      - net.ipv4.tcp_fin_timeout=10
     ulimits:
       nofile:
         soft: 1000000

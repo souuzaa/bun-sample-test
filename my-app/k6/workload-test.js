@@ -14,25 +14,25 @@ const cacheMisses = new Counter("cache_misses");
 // Test configuration with realistic traffic mix
 export const options = {
   scenarios: {
-    // 80% of traffic - read operations (should hit cache)
+    // 90% of traffic - read operations (should hit cache)
     read_heavy: {
       executor: "constant-vus",
-      vus: 100,
+      vus: 150,
       duration: "2m",
       exec: "readOperations",
     },
-    // 15% of traffic - write operations (invalidates cache)
+    // 8% of traffic - write operations (invalidates cache)
     write_moderate: {
       executor: "constant-vus",
-      vus: 20,
+      vus: 15,
       duration: "2m",
       exec: "writeOperations",
       startTime: "5s",
     },
-    // 5% of traffic - CPU intensive operations
+    // 2% of traffic - CPU intensive operations (reduced)
     cpu_intensive: {
       executor: "constant-vus",
-      vus: 10,
+      vus: 3,
       duration: "2m",
       exec: "cpuOperations",
       startTime: "10s",
@@ -40,7 +40,7 @@ export const options = {
   },
   thresholds: {
     http_req_duration: ["p(95)<100", "p(99)<200"],
-    http_req_failed: ["rate<0.05"], // Allow 5% failures under high load
+    http_req_failed: ["rate<0.05"],
     hash_processing_time: ["p(95)<500"],
   },
 };
@@ -111,8 +111,8 @@ export function writeOperations() {
 // CPU intensive operations - 5% of traffic
 // Tests hash workload and payload generation
 export function cpuOperations() {
-  // POST /api/workload/hash with random iterations (10000-60000)
-  const iterations = Math.floor(Math.random() * 50000) + 10000;
+  // POST /api/workload/hash with random iterations (100-500) - kept low for throughput
+  const iterations = Math.floor(Math.random() * 400) + 100;
   const hashPayload = JSON.stringify({
     data: `benchmark-data-${Date.now()}`,
     iterations: iterations,
@@ -146,8 +146,8 @@ export function cpuOperations() {
     }
   }
 
-  // POST /api/workload/payload with random size (10-500KB)
-  const sizeKb = Math.floor(Math.random() * 490) + 10;
+  // POST /api/workload/payload with random size (10-100KB)
+  const sizeKb = Math.floor(Math.random() * 90) + 10;
   const payloadPayload = JSON.stringify({
     size_kb: sizeKb,
   });

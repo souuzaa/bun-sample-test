@@ -26,12 +26,23 @@ export const l1 = {
     l1Cache.delete(key);
   },
 
-  // Invalidate all keys matching a pattern
+  // Invalidate all keys matching a pattern (optimized)
   invalidatePattern(pattern: string): void {
-    const regex = new RegExp(pattern.replace(/\*/g, ".*"));
-    for (const key of l1Cache.keys()) {
-      if (regex.test(key)) {
-        l1Cache.delete(key);
+    // For simple prefix patterns like "users:*", use startsWith for speed
+    if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) {
+      const prefix = pattern.slice(0, -1);
+      for (const key of l1Cache.keys()) {
+        if (key.startsWith(prefix)) {
+          l1Cache.delete(key);
+        }
+      }
+    } else {
+      // Fall back to regex for complex patterns
+      const regex = new RegExp(pattern.replace(/\*/g, ".*"));
+      for (const key of l1Cache.keys()) {
+        if (regex.test(key)) {
+          l1Cache.delete(key);
+        }
       }
     }
   },

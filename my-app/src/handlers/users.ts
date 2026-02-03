@@ -23,8 +23,8 @@ export const getUsers: RouteHandler = async () => {
     // Cache miss - query DB
     const users = await userRepository.findAll();
 
-    // Cache the result
-    await cache.set(cacheKey, users, CACHE_CONFIG.userList);
+    // Cache the result (fire and forget)
+    cache.set(cacheKey, users, CACHE_CONFIG.userList).catch(() => {});
 
     return Response.json(users);
   } catch (error) {
@@ -49,8 +49,8 @@ export const createUser: RouteHandler = async (req) => {
       email: body.email,
     });
 
-    // Invalidate user cache after creation
-    await invalidateUserCache();
+    // Invalidate user cache after creation (non-blocking)
+    invalidateUserCache();
 
     return Response.json(newUser, { status: 201 });
   } catch (error) {
@@ -82,8 +82,8 @@ export const getUserById: RouteHandler = async (_req, params) => {
     const user = await userRepository.findById(id);
 
     if (user) {
-      // Cache the result
-      await cache.set(cacheKey, user, CACHE_CONFIG.userById);
+      // Cache the result (fire and forget)
+      cache.set(cacheKey, user, CACHE_CONFIG.userById).catch(() => {});
       return Response.json(user);
     }
 
@@ -117,10 +117,10 @@ export const updateUser: RouteHandler = async (req, params) => {
     });
 
     if (updatedUser) {
-      // Invalidate user cache, including old email if it changed
+      // Invalidate user cache, including old email if it changed (non-blocking)
       const oldEmail =
         body.email && body.email !== oldUser.email ? oldUser.email : undefined;
-      await invalidateUserCache(id, oldEmail);
+      invalidateUserCache(id, oldEmail);
 
       return Response.json(updatedUser);
     }
@@ -143,8 +143,8 @@ export const deleteUser: RouteHandler = async (_req, params) => {
     const deleted = await userRepository.delete(id);
 
     if (deleted) {
-      // Invalidate user cache after deletion
-      await invalidateUserCache(id);
+      // Invalidate user cache after deletion (non-blocking)
+      invalidateUserCache(id);
 
       return Response.json({ success: true });
     }

@@ -74,6 +74,7 @@ function matchRoute(
 
 const server = Bun.serve({
   port: 3000,
+  reusePort: true,
   async fetch(req) {
     // Record arrival time immediately for queue time metric
     const arrivalTime = performance.now();

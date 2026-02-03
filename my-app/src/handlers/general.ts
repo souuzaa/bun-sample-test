@@ -6,34 +6,25 @@ export const home: RouteHandler = () =>
   Response.json({ message: "Welcome to my app!" });
 
 export const health: RouteHandler = async () => {
+  const start = performance.now();
+
+  // Run health checks in parallel
+  const [dbResult, redisResult] = await Promise.allSettled([
+    healthCheck(),
+    redis.ping(),
+  ]);
+
+  const dbLatency = performance.now() - start;
   const checks = {
-    database: { status: "unhealthy" as "healthy" | "unhealthy", latencyMs: 0 },
-    redis: { status: "unhealthy" as "healthy" | "unhealthy", latencyMs: 0 },
+    database: {
+      status: dbResult.status === "fulfilled" ? "healthy" : "unhealthy",
+      latencyMs: Math.round(dbLatency * 100) / 100,
+    },
+    redis: {
+      status: redisResult.status === "fulfilled" ? "healthy" : "unhealthy",
+      latencyMs: Math.round(dbLatency * 100) / 100,
+    },
   };
-
-  // Check database
-  const dbStart = performance.now();
-  try {
-    await healthCheck();
-    checks.database.status = "healthy";
-    checks.database.latencyMs =
-      Math.round((performance.now() - dbStart) * 100) / 100;
-  } catch {
-    checks.database.latencyMs =
-      Math.round((performance.now() - dbStart) * 100) / 100;
-  }
-
-  // Check Redis
-  const redisStart = performance.now();
-  try {
-    await redis.ping();
-    checks.redis.status = "healthy";
-    checks.redis.latencyMs =
-      Math.round((performance.now() - redisStart) * 100) / 100;
-  } catch {
-    checks.redis.latencyMs =
-      Math.round((performance.now() - redisStart) * 100) / 100;
-  }
 
   const allHealthy =
     checks.database.status === "healthy" && checks.redis.status === "healthy";
