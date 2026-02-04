@@ -29,7 +29,13 @@ export const options = {
 };
 
 // Read operations - 80% of traffic
-// These should hit the cache most of the time
+/**
+ * Execute read-heavy GET requests to /api/users and /api/users/1 and validate their responses to exercise cache hits.
+ *
+ * Performs two requests:
+ * - GET /api/users: checks for HTTP 200 and that the response body is a non-empty array.
+ * - GET /api/users/1: checks for HTTP 200 and that the response body contains an `id` field.
+ */
 export function readOperations() {
   // GET /api/users - should hit L1/L2 cache
   const usersResponse = http.get(`${BASE_URL}/api/users`);
@@ -63,7 +69,13 @@ export function readOperations() {
 }
 
 // Write operations - 15% of traffic
-// These invalidate cache entries
+/**
+ * Creates a new user by POSTing a unique name and email to /api/users and validates the response.
+ *
+ * Generates a unique user payload, sends it to the server, asserts the request returned HTTP 201
+ * and that the response body contains `id` and `email`. This operation is intended to invalidate
+ * cache entries for user data.
+ */
 export function writeOperations() {
   const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
   const payload = JSON.stringify({
@@ -91,7 +103,13 @@ export function writeOperations() {
 }
 
 // CPU intensive operations - 5% of traffic
-// Tests hash workload and payload generation
+/**
+ * Exercises CPU-like workloads by posting hash and payload requests and recording corresponding metrics.
+ *
+ * Posts a hash workload with a randomized iteration count and records the reported processing time to
+ * the `hashProcessingTime` metric; posts a payload workload with a randomized size and records the
+ * requested size to the `payloadSizeKb` metric. Sleeps briefly to pace the scenario.
+ */
 export function cpuOperations() {
   // POST /api/workload/hash with random iterations (100-500) - kept low for throughput
   const iterations = Math.floor(Math.random() * 400) + 100;
@@ -162,7 +180,15 @@ export function cpuOperations() {
   sleep(0.1);
 }
 
-// Optional: Setup function to verify server is ready
+/**
+ * Verify the target server is healthy and provide setup data for the test run.
+ *
+ * Performs a health check against `${BASE_URL}/api/health`; if the check succeeds, returns
+ * an object with the `baseUrl` to be used by tests.
+ *
+ * @returns {{ baseUrl: string }} An object containing `baseUrl`, the target base URL.
+ * @throws {Error} If the health check does not return HTTP 200.
+ */
 export function setup() {
   const healthResponse = http.get(`${BASE_URL}/api/health`);
   check(healthResponse, {
@@ -177,7 +203,10 @@ export function setup() {
   return { baseUrl: BASE_URL };
 }
 
-// Optional: Teardown function for cleanup
+/**
+ * Perform teardown actions after the workload test finishes and log the target base URL.
+ * @param {{baseUrl: string}} data - Setup return object containing the `baseUrl` used for the test.
+ */
 export function teardown(data) {
   console.log(`Workload test completed against ${data.baseUrl}`);
 }
