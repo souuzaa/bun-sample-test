@@ -26,7 +26,7 @@ docker compose up -d
 │                                                              │
 │   ┌────────────────────────────────────────────────────┐    │
 │   │          L1 Cache (LRU, in-process)                │    │
-│   │       Latency: nanoseconds | TTL: 30s              │    │
+│   │       Latency: nanoseconds | TTL: 60s              │    │
 │   └────────────────────────┬───────────────────────────┘    │
 │                            │ miss                            │
 │                            ▼                                 │
@@ -111,10 +111,10 @@ curl http://localhost:3000/
 
 ### Caching Strategy
 
-| Layer | Technology       | Latency     | TTL  | Purpose      |
-| ----- | ---------------- | ----------- | ---- | ------------ |
-| L1    | LRU (in-process) | Nanoseconds | 30s  | Hot data     |
-| L2    | Redis            | <1ms        | 5min | Shared cache |
+| Layer | Technology       | Latency     | TTL  | Max Items | Purpose      |
+| ----- | ---------------- | ----------- | ---- | --------- | ------------ |
+| L1    | LRU (in-process) | Nanoseconds | 60s  | 50,000    | Hot data     |
+| L2    | Redis            | <1ms        | 5min | 256MB     | Shared cache |
 
 Cache-aside pattern: L1 → L2 → Database, with automatic L1 population on L2 hits and Pub/Sub invalidation across instances.
 
@@ -123,9 +123,19 @@ Cache-aside pattern: L1 → L2 → Database, with automatic L1 population on L2 
 | Setting                 | Value       |
 | ----------------------- | ----------- |
 | Pool Mode               | Transaction |
-| Default Pool Size       | 10          |
-| Max Client Connections  | 10,000      |
-| Max DB Connections      | 20          |
+| Default Pool Size       | 50          |
+| Min Pool Size           | 20          |
+| Reserve Pool Size       | 20          |
+| Max Client Connections  | 20,000      |
+| Max DB Connections      | 80          |
+
+### Database Client (Application)
+
+| Setting          | Value |
+| ---------------- | ----- |
+| Max Connections  | 100   |
+| Idle Timeout     | 20s   |
+| Connect Timeout  | 5s    |
 
 ### Performance Targets
 
@@ -198,14 +208,46 @@ my-app/
 
 ## Container Resources
 
-| Service   | CPU Limit  | Memory Limit |
-| --------- | ---------- | ------------ |
-| app       | 4.0 cores  | 1024 MB      |
-| postgres  | 2.0 cores  | 1024 MB      |
-| pgbouncer | 0.5 core   | 128 MB       |
-| redis     | 1.0 core   | 512 MB       |
-| prometheus| 0.5 core   | 256 MB       |
-| grafana   | 0.5 core   | 256 MB       |
+| Service    | CPU Limit  | CPU Reserved | Memory Limit | Memory Reserved |
+| ---------- | ---------- | ------------ | ------------ | --------------- |
+| app        | 8.0 cores  | 4.0 cores    | 4096 MB      | 1024 MB         |
+| postgres   | 2.0 cores  | -            | 1024 MB      | -               |
+| pgbouncer  | 1.0 core   | -            | 256 MB       | -               |
+| redis      | 1.0 core   | -            | 512 MB       | -               |
+| prometheus | 0.5 core   | 0.1 core     | 256 MB       | 64 MB           |
+| grafana    | 0.5 core   | 0.1 core     | 256 MB       | 64 MB           |
+
+## Performance Tuning
+
+### Bun Runtime Configuration
+
+| Setting                  | Value      | Description                     |
+| ------------------------ | ---------- | ------------------------------- |
+| BUN_JSC_forceRAMSize     | 2GB        | JIT compiler memory allocation  |
+| BUN_JSC_useJIT           | 1          | Enable JIT compilation          |
+| BUN_JSC_useDFGJIT        | 1          | Enable DFG JIT tier             |
+| BUN_JSC_useFTLJIT        | 1          | Enable FTL JIT tier             |
+| UV_THREADPOOL_SIZE       | 16         | libuv thread pool size          |
+
+### Worker Pool Configuration
+
+| Setting          | Value | Description                          |
+| ---------------- | ----- | ------------------------------------ |
+| Worker Pool Size | 8     | Parallel workers for CPU-intensive hash operations |
+
+### System-Level Tuning (Docker)
+
+| Setting                        | Value       | Description                    |
+| ------------------------------ | ----------- | ------------------------------ |
+| net.core.somaxconn             | 65535       | Max pending connections        |
+| net.ipv4.tcp_max_syn_backlog   | 65535       | SYN backlog queue size         |
+| net.ipv4.tcp_tw_reuse          | 1           | Reuse TIME_WAIT sockets        |
+| net.ipv4.tcp_fastopen          | 3           | TCP Fast Open enabled          |
+| net.ipv4.ip_local_port_range   | 1024-65535  | Ephemeral port range           |
+| net.ipv4.tcp_keepalive_time    | 30          | Keep-alive timeout (seconds)   |
+| net.ipv4.tcp_fin_timeout       | 10          | FIN timeout (seconds)          |
+| ulimits.nofile                 | 1,000,000   | Max open file descriptors      |
+| ulimits.nproc                  | 65,535      | Max processes                  |
 
 ## Local Development
 
@@ -218,6 +260,24 @@ docker compose up -d postgres pgbouncer redis
 
 # Run dev server
 bun run dev
+```
+
+## Deployment
+
+```bash
+cd my-app
+
+# Build and start all services
+docker compose up -d --build
+
+# View logs
+docker compose logs -f app
+
+# Check resource usage
+docker stats
+
+# Restart after configuration changes
+docker compose down && docker compose up -d --build
 ```
 
 ## License
