@@ -41,5 +41,13 @@ EXPOSE 3000 9464
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-# Start the application
+# Environment variables for performance
+ENV NODE_ENV=production
+ENV BUN_JSC_forceRAMSize=2147483648
+ENV BUN_JSC_useJIT=1
+ENV BUN_JSC_useDFGJIT=1
+ENV BUN_JSC_useFTLJIT=1
+ENV UV_THREADPOOL_SIZE=16
+
+# Start the application (removed --smol for higher performance)
 CMD ["bun", "run", "src/index.ts"]

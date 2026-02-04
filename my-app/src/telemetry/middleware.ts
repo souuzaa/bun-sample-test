@@ -1,8 +1,6 @@
 import {
   httpRequestsTotal,
   httpRequestDuration,
-  httpErrorsTotal,
-  httpResponseSize,
   incrementRequestCount,
   incrementActiveConnections,
   decrementActiveConnections,
@@ -10,83 +8,36 @@ import {
 
 export type MiddlewareHandler = (
   req: Request,
-  params: Record<string, string>
+  params: Record<string, string>,
 ) => Response | Promise<Response>;
 
+/**
+ * Wraps a request handler to record active connections and HTTP request metrics.
+ *
+ * The returned handler increments and decrements active connection counts, records total requests and request duration, and otherwise forwards the original handler's response (rethrowing any errors).
+ *
+ * @param handler - The request handler to wrap
+ * @returns A handler that records metrics for each invocation and returns the original handler's response
+ */
 export function withMetrics(handler: MiddlewareHandler): MiddlewareHandler {
   return async (req: Request, params: Record<string, string>) => {
     const startTime = performance.now();
-    const url = new URL(req.url);
-    const route = url.pathname;
-    const method = req.method;
 
     incrementActiveConnections();
     incrementRequestCount();
 
     try {
       const response = await handler(req, params);
-      const duration = performance.now() - startTime;
-      const status = response.status.toString();
-      const statusClass = `${Math.floor(response.status / 100)}xx`;
 
-      // Record metrics
-      httpRequestsTotal.add(1, {
-        method,
-        route,
-        status,
-        status_class: statusClass,
-      });
-
-      httpRequestDuration.record(duration, {
-        method,
-        route,
-        status,
-      });
-
-      // Try to get response size from Content-Length header
-      const contentLength = response.headers.get("content-length");
-      if (contentLength) {
-        httpResponseSize.record(parseInt(contentLength, 10), {
-          method,
-          route,
-        });
-      }
-
-      // Track errors (4xx and 5xx)
-      if (response.status >= 400) {
-        httpErrorsTotal.add(1, {
-          method,
-          route,
-          status,
-          status_class: statusClass,
-        });
-      }
+      // Record minimal metrics
+      httpRequestsTotal.add(1, { status: response.status.toString() });
+      httpRequestDuration.record(performance.now() - startTime, {});
 
       decrementActiveConnections();
       return response;
     } catch (error) {
-      const duration = performance.now() - startTime;
-
-      httpRequestsTotal.add(1, {
-        method,
-        route,
-        status: "500",
-        status_class: "5xx",
-      });
-
-      httpRequestDuration.record(duration, {
-        method,
-        route,
-        status: "500",
-      });
-
-      httpErrorsTotal.add(1, {
-        method,
-        route,
-        status: "500",
-        status_class: "5xx",
-      });
-
+      httpRequestsTotal.add(1, { status: "500" });
+      httpRequestDuration.record(performance.now() - startTime, {});
       decrementActiveConnections();
       throw error;
     }

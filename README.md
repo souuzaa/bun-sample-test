@@ -1,425 +1,283 @@
 # my-app
 
-A Bun API server with OpenTelemetry observability, Prometheus/Grafana monitoring, and comprehensive performance testing.
-
-## Project Structure
-
-```
-.
-├── assets/                   # Documentation assets
-│   └── dash-view.png
-├── k6/                       # k6 load testing scripts
-│   ├── quick-test.js
-│   ├── stress-test.js
-│   ├── spike-test.js
-│   ├── soak-test.js
-│   └── load-test.js
-├── my-app/
-│   ├── src/
-│   │   ├── index.ts          # API server entry point
-│   │   ├── routes.json       # Route configuration
-│   │   ├── handlers/         # Request handlers
-│   │   │   ├── index.ts
-│   │   │   ├── general.ts
-│   │   │   ├── users.ts
-│   │   │   └── types.ts
-│   │   ├── telemetry/        # OpenTelemetry instrumentation
-│   │   │   ├── index.ts
-│   │   │   ├── metrics.ts
-│   │   │   └── middleware.ts
-│   │   └── __tests__/        # Test suites
-│   │       ├── unit/
-│   │       ├── integration/
-│   │       └── performance/
-│   ├── monitoring/           # Observability stack config
-│   │   ├── prometheus/
-│   │   │   └── prometheus.yml
-│   │   └── grafana/
-│   │       └── provisioning/
-│   ├── .github/workflows/    # CI/CD
-│   │   └── ci.yml
-│   ├── Dockerfile            # Multi-stage production build
-│   ├── docker-compose.yml    # Full stack deployment
-│   ├── .dockerignore         # Docker build exclusions
-│   ├── build.ts              # Bundle configuration
-│   └── package.json
-└── README.md
-```
+A high-performance Bun API server featuring two-tier caching, connection pooling, and OpenTelemetry observability.
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
-
-Deploy the complete stack with one command:
-
 ```bash
 cd my-app
-
-# Build and start all services
-bun run docker:up
-
-# View logs
-bun run docker:logs
+docker compose up -d
 ```
 
-Access the services:
-- **API**: http://localhost:3000
-- **Metrics**: http://localhost:9464/metrics
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3030 (admin/admin)
+| Service    | URL                              | Description              |
+| ---------- | -------------------------------- | ------------------------ |
+| API        | http://localhost:3000            | Main application         |
+| Metrics    | http://localhost:9464/metrics    | Prometheus metrics       |
+| Prometheus | http://localhost:9090            | Metrics storage          |
+| Grafana    | http://localhost:3030            | Dashboards (admin/admin) |
+| PostgreSQL | localhost:5432 (via PgBouncer)   | Database                 |
+| Redis      | localhost:6379                   | L2 Cache                 |
 
-### Option 2: Local Development
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Bun Application                         │
+│                                                              │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │          L1 Cache (LRU, in-process)                │    │
+│   │       Latency: nanoseconds | TTL: 60s              │    │
+│   └────────────────────────┬───────────────────────────┘    │
+│                            │ miss                            │
+│                            ▼                                 │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │           L2 Cache (Redis via ioredis)             │    │
+│   │            Latency: <1ms | TTL: 5min               │    │
+│   └────────────────────────┬───────────────────────────┘    │
+│                            │ miss                            │
+│                            ▼                                 │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │            Database (via PgBouncer)                │    │
+│   │            Transaction pooling mode                │    │
+│   └────────────────────────┬───────────────────────────┘    │
+└────────────────────────────┼────────────────────────────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        ▼                    ▼                    ▼
+   ┌─────────┐         ┌──────────┐         ┌────────────┐
+   │  Redis  │         │ PgBouncer│         │ Prometheus │
+   │ 256MB   │         │ 10 conn  │         │            │
+   └─────────┘         └────┬─────┘         └────────────┘
+                            ▼
+                      ┌──────────┐
+                      │ PostgreSQL│
+                      │ 16-alpine │
+                      └──────────┘
+```
+
+## API Reference
+
+### Users
 
 ```bash
-cd my-app
+# List all users (cached)
+curl http://localhost:3000/api/users
 
-# Install dependencies
-bun install
+# Get user by ID (cached)
+curl http://localhost:3000/api/users/1
 
-# Start development server
-bun run dev
+# Create user
+curl -X POST http://localhost:3000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "John", "email": "john@example.com"}'
+
+# Update user
+curl -X PUT http://localhost:3000/api/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name": "John Updated"}'
+
+# Delete user
+curl -X DELETE http://localhost:3000/api/users/1
 ```
 
-## Docker Deployment
-
-### Container Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Docker Network                          │
-│                                                             │
-│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐       │
-│  │   my-app    │   │ prometheus  │   │   grafana   │       │
-│  │             │   │             │   │             │       │
-│  │  Port 3000  │──▶│  Port 9090  │──▶│  Port 3030  │       │
-│  │  Port 9464  │   │             │   │             │       │
-│  │             │   │             │   │             │       │
-│  │ CPU: 4 core │   │ CPU: 0.5    │   │ CPU: 0.5    │       │
-│  │ RAM: 1024MB │   │ RAM: 256MB  │   │ RAM: 256MB  │       │
-│  └─────────────┘   └─────────────┘   └─────────────┘       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Resource Allocation
-
-| Service | CPU Limit | CPU Reserved | Memory Limit | Memory Reserved |
-|---------|-----------|--------------|--------------|-----------------|
-| **app** | 4.0 cores | 1.0 core | 1024 MB | 256 MB |
-| **prometheus** | 0.5 core | 0.1 core | 256 MB | 64 MB |
-| **grafana** | 0.5 core | 0.1 core | 256 MB | 64 MB |
-| **Total** | 5.0 cores | 1.2 cores | 1536 MB | 384 MB |
-
-### Docker Commands
-
-| Command | Description |
-|---------|-------------|
-| `bun run docker:build` | Build the application image |
-| `bun run docker:up` | Start all services |
-| `bun run docker:down` | Stop all services |
-| `bun run docker:logs` | View all logs |
-| `bun run docker:logs:app` | View app logs only |
-| `bun run docker:restart` | Restart the app container |
-| `bun run docker:stats` | Show resource usage |
-
-### Building the Image
+### Workload Simulation
 
 ```bash
-# Build with docker compose
-bun run docker:build
+# CPU-intensive hash workload
+curl -X POST http://localhost:3000/api/workload/hash \
+  -H "Content-Type: application/json" \
+  -d '{"data": "test", "iterations": 10000}'
 
-# Or build directly
-docker build -t my-app .
+# Bandwidth-intensive payload generation
+curl -X POST http://localhost:3000/api/workload/payload \
+  -H "Content-Type: application/json" \
+  -d '{"size_kb": 100}'
+
+# Workload statistics
+curl http://localhost:3000/api/workload/status
 ```
 
-### Running Individual Containers
-
-```bash
-# Run just the app
-docker run -d \
-  --name my-app \
-  -p 3000:3000 \
-  -p 9464:9464 \
-  --cpus="4.0" \
-  --memory="1024m" \
-  my-app
-
-# Check resource usage
-docker stats my-app --no-stream
-```
-
-### Health Checks
-
-The app container includes a health check that:
-- Runs every 30 seconds
-- Checks `/api/health` endpoint
-- Times out after 5 seconds
-- Retries 3 times before marking unhealthy
-- Waits 10 seconds on startup
-
-```bash
-# Check container health
-docker inspect --format='{{.State.Health.Status}}' my-app
-```
-
-### Production Considerations
-
-For production deployments, consider:
-
-1. **Secrets Management**: Use Docker secrets or environment variables for sensitive data
-2. **Persistent Storage**: Mount volumes for Prometheus and Grafana data
-3. **Reverse Proxy**: Add nginx or traefik for SSL termination
-4. **Scaling**: Use Docker Swarm or Kubernetes for horizontal scaling
-5. **Logging**: Configure log drivers for centralized logging
-
-Example with external volumes:
-
-```bash
-docker compose -f docker-compose.yml up -d
-```
-
-## Scripts
-
-### Application
-
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Development with hot reload |
-| `bun run start` | Run from source |
-| `bun run build` | Bundle to `dist/` |
-| `bun run serve` | Run bundled version |
-
-### Testing
-
-| Command | Description |
-|---------|-------------|
-| `bun test` | Run all tests |
-| `bun test src/__tests__/unit` | Run unit tests only |
-| `bun test src/__tests__/integration` | Run integration tests |
-| `bun test src/__tests__/performance` | Run performance tests |
-
-### k6 Load Testing
-
-**With k6 installed locally (uses localhost:3000):**
-
-| Command | Description |
-|---------|-------------|
-| `bun run k6:quick` | Quick 10s load test (50 VUs) |
-| `bun run k6:stress` | Stress test (10-190 VUs ramp) |
-| `bun run k6:spike` | Spike test (10x traffic burst) |
-| `bun run k6:soak` | Soak/endurance test (3 min) |
-| `bun run k6:full` | Full test suite (~4 min) |
-
-**With Docker (no k6 installation needed, uses host.docker.internal:3000):**
-
-| Command | Description |
-|---------|-------------|
-| `bun run k6:docker:quick` | Quick test via Docker |
-| `bun run k6:docker:stress` | Stress test via Docker |
-| `bun run k6:docker:spike` | Spike test via Docker |
-| `bun run k6:docker:soak` | Soak test via Docker |
-| `bun run k6:docker:full` | Full test via Docker |
-
-**Custom BASE_URL:**
-
-You can override the target URL using the `BASE_URL` environment variable:
-
-```bash
-# Native k6 with custom URL
-BASE_URL=http://192.168.1.100:3000 k6 run k6/quick-test.js
-
-# Docker k6 with custom URL
-docker run --rm -i \
-  -e BASE_URL=http://host.docker.internal:3000 \
-  -v ./k6:/scripts \
-  grafana/k6 run /scripts/quick-test.js
-```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Welcome message |
-| GET | `/api/health` | Health check with timestamp |
-| GET | `/api/users` | List all users |
-| POST | `/api/users` | Create a user |
-| GET | `/api/users/:id` | Get user by ID |
-
-## Examples
+### System
 
 ```bash
 # Health check
 curl http://localhost:3000/api/health
 
-# Get all users
-curl http://localhost:3000/api/users
+# Welcome message
+curl http://localhost:3000/
+```
 
-# Get user by ID
-curl http://localhost:3000/api/users/1
+## Performance
 
-# Create a user
-curl -X POST http://localhost:3000/api/users \
-  -H "Content-Type: application/json" \
-  -d '{"name": "John", "email": "john@example.com"}'
+### Caching Strategy
+
+| Layer | Technology       | Latency     | TTL  | Max Items | Purpose      |
+| ----- | ---------------- | ----------- | ---- | --------- | ------------ |
+| L1    | LRU (in-process) | Nanoseconds | 60s  | 50,000    | Hot data     |
+| L2    | Redis            | <1ms        | 5min | 256MB     | Shared cache |
+
+Cache-aside pattern: L1 → L2 → Database, with automatic L1 population on L2 hits and Pub/Sub invalidation across instances.
+
+### Connection Pooling (PgBouncer)
+
+| Setting                 | Value       |
+| ----------------------- | ----------- |
+| Pool Mode               | Transaction |
+| Default Pool Size       | 50          |
+| Min Pool Size           | 20          |
+| Reserve Pool Size       | 20          |
+| Max Client Connections  | 20,000      |
+| Max DB Connections      | 80          |
+
+### Database Client (Application)
+
+| Setting          | Value |
+| ---------------- | ----- |
+| Max Connections  | 100   |
+| Idle Timeout     | 20s   |
+| Connect Timeout  | 5s    |
+
+### Performance Targets
+
+| Metric                  | Target   |
+| ----------------------- | -------- |
+| Throughput              | >50K RPS |
+| p99 Latency             | <10ms    |
+| p95 Latency             | <5ms     |
+| L1 Cache Hit Rate       | >80%     |
+| Combined Cache Hit Rate | >95%     |
+
+## Load Testing
+
+```bash
+# Quick test (10s, 50 VUs)
+bun run k6:docker:quick
+
+# Stress test (ramp 10-190 VUs)
+bun run k6:docker:stress
+
+# Spike test (10x traffic burst)
+bun run k6:docker:spike
+
+# Soak test (3 min sustained)
+bun run k6:docker:soak
+
+# Full test suite
+bun run k6:docker:full
+
+# Realistic workload (80% reads, 15% writes, 5% CPU-intensive)
+docker run --rm -i --add-host=host.docker.internal:host-gateway \
+  -e BASE_URL=http://host.docker.internal:3000 \
+  -v ./k6:/scripts grafana/k6 run /scripts/workload-test.js
 ```
 
 ## Observability
 
-### Metrics Endpoint
+### Key Metrics
 
-When the app is running, Prometheus metrics are exposed at:
+| Metric                       | Type      | Description               |
+| ---------------------------- | --------- | ------------------------- |
+| `http_request_duration_ms`   | Histogram | Request latency           |
+| `http_request_queue_time_ms` | Histogram | Queue/saturation time     |
+| `cache_hits_total`           | Counter   | Cache hits by layer       |
+| `cache_misses_total`         | Counter   | Cache misses              |
+| `pg_query_duration_ms`       | Histogram | Database query duration   |
+| `tcp_connection_states`      | Gauge     | TCP connections by state  |
+
+### Grafana Dashboard
+
+Pre-configured panels for latency analysis, connection capacity, TCP metrics, cache performance, database metrics, and resource usage.
+
+## Project Structure
 
 ```
-http://localhost:9464/metrics
+my-app/
+├── src/
+│   ├── index.ts          # API server entry point
+│   ├── routes.json       # Route configuration
+│   ├── handlers/         # Request handlers
+│   ├── db/               # Database layer
+│   ├── cache/            # Two-tier caching
+│   └── telemetry/        # Observability
+├── k6/                   # Load testing scripts
+├── monitoring/           # Prometheus & Grafana config
+├── init.sql              # Database schema
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-### Available Metrics
+## Container Resources
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `http_requests_total` | Counter | Total HTTP requests by method, route, status |
-| `http_request_duration_ms` | Histogram | Request latency (p50, p95, p99) |
-| `http_errors_total` | Counter | Error count by endpoint |
-| `http_requests_per_second` | Gauge | Real-time throughput |
-| `http_active_connections` | Gauge | Current active connections |
-| `process_cpu_usage_percent` | Gauge | Process CPU usage |
-| `process_memory_heap_used_bytes` | Gauge | Heap memory used |
-| `process_memory_heap_total_bytes` | Gauge | Total heap memory |
-| `process_memory_rss_bytes` | Gauge | Resident set size |
+| Service    | CPU Limit  | CPU Reserved | Memory Limit | Memory Reserved |
+| ---------- | ---------- | ------------ | ------------ | --------------- |
+| app        | 8.0 cores  | 4.0 cores    | 4096 MB      | 1024 MB         |
+| postgres   | 2.0 cores  | -            | 1024 MB      | -               |
+| pgbouncer  | 1.0 core   | -            | 256 MB       | -               |
+| redis      | 1.0 core   | -            | 512 MB       | -               |
+| prometheus | 0.5 core   | 0.1 core     | 256 MB       | 64 MB           |
+| grafana    | 0.5 core   | 0.1 core     | 256 MB       | 64 MB           |
 
-### Monitoring Stack
+## Performance Tuning
 
-The Docker deployment includes a pre-configured monitoring stack:
+### Bun Runtime Configuration
 
-![Grafana Dashboard](assets/dash-view.png)
+| Setting                  | Value      | Description                     |
+| ------------------------ | ---------- | ------------------------------- |
+| BUN_JSC_forceRAMSize     | 2GB        | JIT compiler memory allocation  |
+| BUN_JSC_useJIT           | 1          | Enable JIT compilation          |
+| BUN_JSC_useDFGJIT        | 1          | Enable DFG JIT tier             |
+| BUN_JSC_useFTLJIT        | 1          | Enable FTL JIT tier             |
+| UV_THREADPOOL_SIZE       | 16         | libuv thread pool size          |
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Application | http://localhost:3000 | - |
-| Metrics | http://localhost:9464/metrics | - |
-| Prometheus | http://localhost:9090 | - |
-| Grafana | http://localhost:3030 | admin / admin |
+### Worker Pool Configuration
 
-Grafana comes pre-configured with:
-- Prometheus data source (auto-provisioned)
-- Performance dashboard with CPU, memory, throughput, latency panels
+| Setting          | Value | Description                          |
+| ---------------- | ----- | ------------------------------------ |
+| Worker Pool Size | 8     | Parallel workers for CPU-intensive hash operations |
 
-### Checking Resource Usage
+### System-Level Tuning (Docker)
+
+| Setting                        | Value       | Description                    |
+| ------------------------------ | ----------- | ------------------------------ |
+| net.core.somaxconn             | 65535       | Max pending connections        |
+| net.ipv4.tcp_max_syn_backlog   | 65535       | SYN backlog queue size         |
+| net.ipv4.tcp_tw_reuse          | 1           | Reuse TIME_WAIT sockets        |
+| net.ipv4.tcp_fastopen          | 3           | TCP Fast Open enabled          |
+| net.ipv4.ip_local_port_range   | 1024-65535  | Ephemeral port range           |
+| net.ipv4.tcp_keepalive_time    | 30          | Keep-alive timeout (seconds)   |
+| net.ipv4.tcp_fin_timeout       | 10          | FIN timeout (seconds)          |
+| ulimits.nofile                 | 1,000,000   | Max open file descriptors      |
+| ulimits.nproc                  | 65,535      | Max processes                  |
+
+## Local Development
 
 ```bash
-# View container stats
-bun run docker:stats
+cd my-app
+bun install
 
-# Sample output:
-# CONTAINER ID   NAME                CPU %     MEM USAGE / LIMIT   MEM %
-# 1e21cc272f6b   my-app              0.01%     30.21MiB / 1GiB     3.01%
-# c831e2c7c971   my-app-prometheus   0.36%     35.38MiB / 256MiB   13.82%
-# 8bd4cad4b266   my-app-grafana      0.13%     97.19MiB / 256MiB   37.96%
+# Start dependencies
+docker compose up -d postgres pgbouncer redis
+
+# Run dev server
+bun run dev
 ```
 
-## Testing
-
-### Test Suites
-
-**Unit Tests** (`src/__tests__/unit/`)
-- Handler function tests in isolation
-- Fast, no server startup required
-
-**Integration Tests** (`src/__tests__/integration/`)
-- Full API tests with real HTTP requests
-- Tests routing, handlers, and error handling
-
-**Performance Tests** (`src/__tests__/performance/`)
-- Load tests (50 concurrent, 500 requests)
-- Stress tests (ramping 10-190 concurrency)
-- Spike tests (10x traffic burst with recovery)
-- Soak tests (sustained load with memory monitoring)
-- Memory leak detection
-
-### Running Tests
+## Deployment
 
 ```bash
-# Run all tests
-bun test
+cd my-app
 
-# Run specific test file
-bun test src/__tests__/unit/users.test.ts
+# Build and start all services
+docker compose up -d --build
 
-# Run tests matching pattern
-bun test --test-name-pattern "health"
-```
+# View logs
+docker compose logs -f app
 
-## k6 Load Testing
+# Check resource usage
+docker stats
 
-### Quick Test
-
-Run a quick 10-second load test with 50 virtual users:
-
-```bash
-# Start the stack first
-bun run docker:up
-
-# Run k6 test
-bun run k6:docker:quick
-```
-
-Sample output:
-```
-QUICK PERFORMANCE TEST RESULTS
-======================================================================
-Endpoint                     Avg (ms)    P50 (ms)    P95 (ms)    P99 (ms)
-----------------------------------------------------------------------
-GET /                            1.61         N/A        4.97         N/A
-GET /api/health                  1.42         N/A        4.42         N/A
-GET /api/users                   4.40         N/A       12.86         N/A
-GET /api/users/:id               1.53         N/A        4.60         N/A
-POST /api/users                  1.37         N/A        4.34         N/A
-----------------------------------------------------------------------
-
-Total Requests: 22535
-Error Rate: 0.00%
-Throughput: 2230.59 req/s
-```
-
-### Stress Test
-
-Find the breaking point by ramping up load:
-
-```bash
-bun run k6:docker:stress
-```
-
-### Spike Test
-
-Test system behavior under sudden traffic spikes:
-
-```bash
-bun run k6:docker:spike
-```
-
-The spike test runs three phases:
-1. **Baseline**: 10 VUs for 15s
-2. **Spike**: 100 VUs for 30s (10x increase)
-3. **Recovery**: Back to 10 VUs for 15s
-
-## Architecture
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  Bun Server │────▶│  Handlers   │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │  Telemetry  │
-                    │  Middleware │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │Prometheus│ │  Grafana │ │  Metrics │
-        │  :9090   │ │  :3030   │ │  :9464   │
-        └──────────┘ └──────────┘ └──────────┘
+# Restart after configuration changes
+docker compose down && docker compose up -d --build
 ```
 
 ## License

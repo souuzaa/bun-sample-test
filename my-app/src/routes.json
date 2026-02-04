@@ -4,6 +4,28 @@
     { "method": "GET", "path": "/api/health", "handler": "health" },
     { "method": "GET", "path": "/api/users", "handler": "getUsers" },
     { "method": "POST", "path": "/api/users", "handler": "createUser" },
-    { "method": "GET", "path": "/api/users/:id", "handler": "getUserById" }
+    { "method": "GET", "path": "/api/users/:id", "handler": "getUserById" },
+    { "method": "PUT", "path": "/api/users/:id", "handler": "updateUser" },
+    { "method": "DELETE", "path": "/api/users/:id", "handler": "deleteUser" },
+    {
+      "method": "POST",
+      "path": "/api/workload/hash",
+      "handler": "hashWorkload"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workload/payload",
+      "handler": "payloadWorkload"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workload/memory",
+      "handler": "memoryWorkload"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workload/status",
+      "handler": "workloadStatus"
+    }
   ]
 }
