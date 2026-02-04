@@ -24,6 +24,17 @@ type CompiledRoute = {
   routeName: string;
 };
 
+/**
+ * Compile a RouteConfig into a CompiledRoute suitable for matching incoming requests and recording metrics.
+ *
+ * @param route - Route configuration containing `method`, `path` (with `:param` segments), and `handler` name
+ * @returns A CompiledRoute with:
+ *  - `pattern`: a RegExp anchored to start/end matching the configured path
+ *  - `paramNames`: extracted path parameter names in order
+ *  - `handler`: the resolved handler wrapped with metrics
+ *  - `routeName`: the original route path
+ * @throws Error if the handler named by `route.handler` cannot be found
+ */
 function compileRoute(route: RouteConfig): CompiledRoute {
   const paramNames: string[] = [];
   const patternStr = route.path.replace(/:(\w+)/g, (_, name) => {
@@ -49,6 +60,11 @@ function compileRoute(route: RouteConfig): CompiledRoute {
 
 const compiledRoutes = routesConfig.routes.map(compileRoute);
 
+/**
+ * Finds the first compiled route that matches the given HTTP method and request path.
+ *
+ * @returns An object with `handler` (the route's handler), `params` (map of path parameter names to values), and `routeName` (the route's configured path) if a match is found; `null` otherwise.
+ */
 function matchRoute(
   method: string,
   path: string,

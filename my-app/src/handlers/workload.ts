@@ -20,6 +20,11 @@ for (let i = 0; i < WORKER_POOL_SIZE; i++) {
   workerPool.push(worker);
 }
 
+/**
+ * Selects the first non-busy worker from the worker pool.
+ *
+ * @returns The first idle `Worker` from the pool, or `null` if no workers are available.
+ */
 function getAvailableWorker(): Worker | null {
   for (const worker of workerPool) {
     if (!busyWorkers.has(worker)) {
@@ -29,6 +34,11 @@ function getAvailableWorker(): Worker | null {
   return null;
 }
 
+/**
+ * Assigns pending hash tasks to idle workers and drives their completion callbacks.
+ *
+ * Processes tasks from the internal queue while workers are available: assigns each task to a worker, marks the worker busy, attaches success and error listeners that resolve or reject the task's promise, remove listeners, mark the worker as free, and continue processing remaining queued tasks.
+ */
 function processQueue() {
   while (workerQueue.length > 0) {
     const worker = getAvailableWorker();
@@ -59,6 +69,13 @@ function processQueue() {
   }
 }
 
+/**
+ * Enqueues a hashing task to be processed by the worker pool.
+ *
+ * @param data - The input string to be hashed
+ * @param iterations - The number of hash iterations to perform (will be capped elsewhere)
+ * @returns The resulting hash as a hexadecimal string, or rejects if the worker fails to compute the hash
+ */
 function hashInWorker(data: string, iterations: number): Promise<string> {
   return new Promise((resolve, reject) => {
     workerQueue.push({ resolve, reject, data, iterations });

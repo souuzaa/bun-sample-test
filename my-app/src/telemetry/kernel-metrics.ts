@@ -50,8 +50,11 @@ const tcpListenOverflowsTotalCounter = meter.createObservableCounter(
 );
 
 /**
- * Parse /proc/net/tcp to get TCP connection states
- * Returns a map of state name to count
+ * Get TCP connection counts per state by parsing the system's proc filesystem.
+ *
+ * Attempts to read /host/proc/net/tcp then /proc/net/tcp; on read or parse failure all known states map to 0 and an error is logged.
+ *
+ * @returns A record mapping each TCP state name to its connection count
  */
 function getTcpConnectionStates(): Record<string, number> {
   const stateCounts: Record<string, number> = {};
@@ -95,8 +98,11 @@ function getTcpConnectionStates(): Record<string, number> {
 }
 
 /**
- * Parse /proc/net/snmp for TCP statistics
- * Returns RetransSegs and OutSegs values
+ * Parse system TCP SNMP metrics and extract RetransSegs and OutSegs.
+ *
+ * Reads /host/proc/net/snmp with a fallback to /proc/net/snmp and parses the first two lines that start with `Tcp:` to locate header and value columns. If the expected fields are missing or the file cannot be read, returns zeros.
+ *
+ * @returns An object with `retransSegs` — the number of retransmitted TCP segments, and `outSegs` — the number of TCP segments sent; each is `0` if not found or on error.
  */
 function getTcpStats(): { retransSegs: number; outSegs: number } {
   try {
@@ -145,7 +151,9 @@ function getTcpStats(): { retransSegs: number; outSegs: number } {
 }
 
 /**
- * Parse /proc/net/netstat for ListenOverflows
+ * Retrieve the kernel TCP `ListenOverflows` counter from the system netstat file.
+ *
+ * @returns The `ListenOverflows` value as an integer, or `0` if the field is missing or the file cannot be read/parsed.
  */
 function getListenOverflows(): number {
   try {
@@ -190,7 +198,13 @@ function getListenOverflows(): number {
 }
 
 /**
- * Register kernel metrics with batch observable callback
+ * Registers a batch observable callback that updates kernel TCP metrics.
+ *
+ * The callback reads kernel proc files and records:
+ * - per-state TCP connection counts on `tcpConnectionStatesGauge`
+ * - `RetransSegs` on `tcpRetransmitsTotalCounter`
+ * - `OutSegs` on `tcpSegmentsSentTotalCounter`
+ * - `ListenOverflows` on `tcpListenOverflowsTotalCounter`
  */
 export function registerKernelMetrics(): void {
   // Register batch observable callback for all kernel metrics
