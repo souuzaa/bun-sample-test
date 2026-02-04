@@ -1,8 +1,8 @@
 import type { RouteHandler } from "./types";
 import { sql } from "../db/client";
 
-// Worker pool for CPU-intensive hash operations (reduced to limit CPU)
-const WORKER_POOL_SIZE = 2;
+// Worker pool for CPU-intensive hash operations (scaled for higher throughput)
+const WORKER_POOL_SIZE = 8;
 const workerPool: Worker[] = [];
 const workerQueue: Array<{
   resolve: (value: string) => void;

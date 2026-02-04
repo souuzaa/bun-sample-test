@@ -7,8 +7,8 @@ export interface CacheOptions {
 
 // L1 cache - in-process, nanosecond access
 const l1Cache = new LRUCache<string, unknown>({
-  max: 10000, // Max 10000 items
-  ttl: 1000 * 30, // 30 second TTL (short for consistency)
+  max: 50000, // Max 50000 items for higher cache hit rate
+  ttl: 1000 * 60, // 60 second TTL for better cache utilization
   updateAgeOnGet: true, // Reset TTL on access
   allowStale: true, // Return stale while revalidating
 });

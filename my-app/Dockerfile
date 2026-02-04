@@ -43,7 +43,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 
 # Environment variables for performance
 ENV NODE_ENV=production
-ENV BUN_JSC_forceRAMSize=1073741824
+ENV BUN_JSC_forceRAMSize=2147483648
+ENV BUN_JSC_useJIT=1
+ENV BUN_JSC_useDFGJIT=1
+ENV BUN_JSC_useFTLJIT=1
+ENV UV_THREADPOOL_SIZE=16
 
-# Start the application with smol mode for better memory efficiency
-CMD ["bun", "--smol", "run", "src/index.ts"]
+# Start the application (removed --smol for higher performance)
+CMD ["bun", "run", "src/index.ts"]
